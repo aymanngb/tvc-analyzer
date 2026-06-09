@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "tvc-analyzer",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "vite"],
+      "port": 5173
+    }
+  ]
+}
