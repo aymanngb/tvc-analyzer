@@ -25,18 +25,29 @@
     "wait-on": "^7.2.0"
   },
   "build": {
-    "appId": "com.tvcanalyzer.app",
+    "appId": "com.silvergreenfilms.tvcanalyzer",
     "productName": "TVC Brief Analyzer",
     "mac": {
-      "category": "public.app-category.productivity"
+      "category": "public.app-category.productivity",
+      "icon": "public/logo.png",
+      "target": [{ "target": "dmg", "arch": ["x64", "arm64"] }],
+      "identity": null
+    },
+    "dmg": {
+      "title": "TVC Brief Analyzer",
+      "background": null,
+      "window": { "width": 540, "height": 380 }
     },
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "public/**/*",
       "node_modules/**/*"
     ],
     "directories": {
-      "output": "release"
-    }
+      "output": "release",
+      "buildResources": "public"
+    },
+    "npmRebuild": true
   }
 }

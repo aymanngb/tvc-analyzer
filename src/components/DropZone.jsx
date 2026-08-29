@@ -3,20 +3,38 @@ import React, { useRef, useState } from 'react'
 const ACCEPTED = '.pdf,.docx,.jpg,.jpeg,.png'
 const ACCEPTED_TYPES = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'image/jpeg', 'image/png']
 
-export default function DropZone({ onFile, uploadedFile, onClear }) {
+const ACCEPTED_EXTS = ACCEPTED.split(',')
+
+function isAccepted(file) {
+  if (ACCEPTED_TYPES.includes(file.type)) return true
+  const name = file.name.toLowerCase()
+  return ACCEPTED_EXTS.some((ext) => name.endsWith(ext))
+}
+
+export default function DropZone({ onFile, uploadedFile, onClear, label = 'Drop your brief or treatment here' }) {
   const inputRef = useRef(null)
   const [dragging, setDragging] = useState(false)
+  const [rejected, setRejected] = useState(null)
+
+  function accept(file) {
+    if (!file) return
+    if (!isAccepted(file)) {
+      setRejected(file.name)
+      return
+    }
+    setRejected(null)
+    onFile(file)
+  }
 
   function handleDrop(e) {
     e.preventDefault()
     setDragging(false)
-    const file = e.dataTransfer.files[0]
-    if (file) onFile(file)
+    accept(e.dataTransfer.files[0])
   }
 
   function handleChange(e) {
-    const file = e.target.files[0]
-    if (file) onFile(file)
+    accept(e.target.files[0])
+    e.target.value = ''
   }
 
   if (uploadedFile) {
@@ -42,8 +60,9 @@ export default function DropZone({ onFile, uploadedFile, onClear }) {
     >
       <div className="dropzone-inner">
         <span className="upload-icon">📂</span>
-        <p className="drop-label">Drop your brief or treatment here</p>
+        <p className="drop-label">{label}</p>
         <p className="drop-types">PDF · DOCX · JPG · PNG</p>
+        {rejected && <p className="drop-rejected">⚠️ {rejected} — unsupported file type</p>}
         <button className="browse-btn" onClick={(e) => { e.stopPropagation(); inputRef.current?.click() }}>
           Browse File
         </button>

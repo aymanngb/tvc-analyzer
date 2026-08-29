@@ -1,19 +1,19 @@
 import React, { useState } from 'react'
+import { parseMarkdownTable } from '../lib/mdTable'
 
-function parseMarkdownTable(md) {
-  const lines = md.split('\n').filter((l) => l.trim().startsWith('|'))
-  if (lines.length < 2) return null
-
-  const headers = lines[0].split('|').map((h) => h.trim()).filter(Boolean)
-  const rows = lines.slice(2).map((line) =>
-    line.split('|').map((cell) => cell.trim()).filter(Boolean)
-  ).filter((row) => row.length > 0)
-
-  return { headers, rows }
-}
+const BADGE_CLASS = { '🔴': 'red', '🟡': 'yellow', '🟢': 'green' }
 
 function Cell({ content }) {
-  return <td dangerouslySetInnerHTML={{ __html: content.replace(/🔴/g, '<span class="badge red">🔴</span>').replace(/🟡/g, '<span class="badge yellow">🟡</span>').replace(/🟢/g, '<span class="badge green">🟢</span>') }} />
+  const parts = content.split(/(🔴|🟡|🟢)/)
+  return (
+    <td>
+      {parts.map((part, i) =>
+        BADGE_CLASS[part]
+          ? <span key={i} className={`badge ${BADGE_CLASS[part]}`}>{part}</span>
+          : part
+      )}
+    </td>
+  )
 }
 
 export default function AnalysisTable({ title, content, badgeSummary }) {
@@ -40,11 +40,21 @@ export default function AnalysisTable({ title, content, badgeSummary }) {
                 </tr>
               </thead>
               <tbody>
-                {table.rows.map((row, ri) => (
-                  <tr key={ri} className={ri % 2 === 0 ? 'row-even' : 'row-odd'}>
-                    {row.map((cell, ci) => <Cell key={ci} content={cell} />)}
-                  </tr>
-                ))}
+                {table.rows.map((row, ri) => {
+                  const isNewGroup = ri > 0 && row[0] && row[0] !== table.rows[ri - 1][0]
+                  return (
+                    <React.Fragment key={ri}>
+                      {isNewGroup && (
+                        <tr className="group-separator">
+                          <td colSpan={table.headers.length} />
+                        </tr>
+                      )}
+                      <tr className={ri % 2 === 0 ? 'row-even' : 'row-odd'}>
+                        {row.map((cell, ci) => <Cell key={ci} content={cell} />)}
+                      </tr>
+                    </React.Fragment>
+                  )
+                })}
               </tbody>
             </table>
           ) : (

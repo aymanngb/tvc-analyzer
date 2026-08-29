@@ -4,9 +4,10 @@ import ResultsScreen from './screens/ResultsScreen'
 import SettingsScreen from './screens/SettingsScreen'
 
 export default function App() {
-  const [screen, setScreen] = useState('upload') // 'upload' | 'results'
+  const [screen, setScreen] = useState('upload')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [analysisResult, setAnalysisResult] = useState(null)
+  const [projectMeta, setProjectMeta] = useState({ name: '', date: '' })
 
   return (
     <div className="app">
@@ -15,8 +16,9 @@ export default function App() {
       {screen === 'upload' && (
         <UploadScreen
           onOpenSettings={() => setSettingsOpen(true)}
-          onResult={(result) => {
+          onResult={(result, name) => {
             setAnalysisResult(result)
+            setProjectMeta({ name: name || 'Untitled Project', date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) })
             setScreen('results')
           }}
         />
@@ -25,6 +27,7 @@ export default function App() {
       {screen === 'results' && (
         <ResultsScreen
           result={analysisResult}
+          projectMeta={projectMeta}
           onNewBrief={() => {
             setAnalysisResult(null)
             setScreen('upload')
