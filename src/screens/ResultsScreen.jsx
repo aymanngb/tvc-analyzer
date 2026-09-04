@@ -47,6 +47,11 @@ function parseEPNote(result) {
   return match ? match[1].trim() : null
 }
 
+function parseAtAGlance(result) {
+  const match = result.match(/## At a Glance\s*\n([\s\S]*?)(?=\n## |$)/)
+  return match ? match[1].trim() : null
+}
+
 function countComplexity(content) {
   const high = (content.match(/🔴/g) || []).length
   const med = (content.match(/🟡/g) || []).length
@@ -89,6 +94,11 @@ function buildPrintHTML(result, meta = {}) {
   `).join('')
 
   const ep = epNote ? `<div class="ep-note"><strong>EP Note:</strong> ${escapeHtml(epNote)}</div>` : ''
+
+  const glanceMd = parseAtAGlance(result)
+  const glance = glanceMd
+    ? `<div class="glance"><div class="glance-title">At a Glance</div>${mdTableToHtml(glanceMd)}</div>`
+    : ''
 
   const abbrevRows = ABBREV_KEY.map(([abbr, meaning]) =>
     `<tr><td class="abbr-key">${abbr}</td><td>${meaning}</td></tr>`
@@ -147,6 +157,15 @@ function buildPrintHTML(result, meta = {}) {
   .abbrev-grid td { border: none; border-bottom: 1px solid #eee; font-size: 8.5px; padding: 3px 8px; }
   .abbrev-grid td.abbr-key { font-weight: 700; color: #444; width: 36px; white-space: nowrap; }
 
+  /* ── At a Glance ── */
+  .glance { margin-bottom: 16px; border: 1.5px solid #99CC00; border-radius: 6px; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
+  .glance-title { background: #99CC00; color: #fff; padding: 5px 12px; font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; }
+  .glance table { border: none; }
+  .glance thead { display: none; }
+  .glance td { border: none; border-bottom: 1px solid #eee; font-size: 10px; padding: 5px 12px; }
+  .glance tr:nth-child(even) td { background: #fafff0; }
+  .glance td:first-child { font-weight: 700; color: #444; width: 110px; white-space: nowrap; }
+
   /* ── EP Note ── */
   .ep-note { margin-top: 14px; background: #fffbea; border: 1px solid #e5c000; border-radius: 6px; padding: 8px 14px; font-size: 9.5px; line-height: 1.6; }
 </style>
@@ -163,6 +182,7 @@ function buildPrintHTML(result, meta = {}) {
 </div>
 
 ${badge}
+${glance}
 ${tables}
 ${ep}
 
@@ -188,6 +208,7 @@ export default function ResultsScreen({ result, projectMeta = {}, onNewBrief }) 
   const docType = parseDocType(result)
   const sections = parseSections(result)
   const epNote = parseEPNote(result)
+  const glance = parseMarkdownTable(parseAtAGlance(result) || '')
 
   async function handleExport() {
     const html = buildPrintHTML(result, { name: projectName, date: projectDate })
@@ -214,6 +235,22 @@ export default function ResultsScreen({ result, projectMeta = {}, onNewBrief }) 
         {docType && (
           <div className="doctype-badge" style={{ backgroundColor: docType.color + '22', borderColor: docType.color, color: docType.color }}>
             {docType.label}
+          </div>
+        )}
+
+        {glance && (
+          <div className="glance-card">
+            <div className="glance-card-title">At a Glance</div>
+            <table className="glance-table">
+              <tbody>
+                {glance.rows.map((row, i) => (
+                  <tr key={i}>
+                    <td className="glance-item">{row[0]}</td>
+                    <td className="glance-detail">{row[1]}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
 

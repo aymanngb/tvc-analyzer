@@ -212,6 +212,24 @@ body { height: 100%; overflow: hidden; font-family: var(--font); background: var
 .ep-label { font-size: 11px; font-weight: 700; color: #99CC00; text-transform: uppercase; letter-spacing: 0.8px; }
 .ep-note p { font-size: 14px; line-height: 1.6; font-style: italic; color: #ddd; }
 
+/* ── At a Glance ───────────────────────────────────────────────────────────── */
+.glance-card {
+  background: var(--card); border: 1px solid #99CC00; border-radius: var(--radius);
+  overflow: hidden; flex-shrink: 0;
+}
+.glance-card-title {
+  background: #99CC00; color: #000; padding: 8px 16px;
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px;
+}
+.glance-table { width: 100%; border-collapse: collapse; }
+.glance-table td { padding: 10px 16px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.glance-table tr:last-child td { border-bottom: none; }
+.glance-item {
+  width: 140px; white-space: nowrap; color: var(--muted);
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+}
+.glance-detail { font-size: 14px; color: var(--text); line-height: 1.5; }
+
 /* ── Settings Modal ────────────────────────────────────────────────────────── */
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 100; display: flex; align-items: center; justify-content: center; }
 .modal { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); width: 420px; overflow: hidden; }

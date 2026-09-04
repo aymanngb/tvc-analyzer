@@ -147,6 +147,12 @@ Only rows that actually apply.
 Categories in order: Shoot Days, Sets & Locations, Principal Cast, Featured Extras, BG Extras, Hero Props, Camera, Grip, Lighting, Specialty, VFX, Post, Key Risks
 Items = comma-separated keywords, numbers first.
 
+## At a Glance
+| Item | Detail |
+Exactly these six rows, in this order: Scope, Build, Cast, Heavy Lift, Biggest Risk, Budget Flag.
+Detail is ONE short sentence — max 8 words, ends with a period. This is the ONLY table that uses sentences, not fragments.
+Write this section LAST, after every table above is finished, so it reflects them.
+
 ## EP Note
 [One sentence max. What the EP says to the client before signing.]`
 
