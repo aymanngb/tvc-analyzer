@@ -6,6 +6,7 @@ export default function UploadScreen({ onOpenSettings, onResult }) {
   const [projectName, setProjectName] = useState('')
   const [pastedText, setPastedText] = useState('')
   const [treatmentFile, setTreatmentFile] = useState(null)
+  const [treatmentMode, setTreatmentMode] = useState('file')
   const [briefFile, setBriefFile] = useState(null)
   const [producerNotes, setProducerNotes] = useState('')
   const [loading, setLoading] = useState(false)
@@ -18,7 +19,6 @@ export default function UploadScreen({ onOpenSettings, onResult }) {
     setLoading(true)
 
     try {
-      // Build treatment payload
       let payload = {}
       if (treatmentFile) {
         const arrayBuffer = await treatmentFile.arrayBuffer()
@@ -33,7 +33,6 @@ export default function UploadScreen({ onOpenSettings, onResult }) {
         payload = { text: pastedText, fileBuffer: null, fileType: null, fileName: null, producerNotes }
       }
 
-      // Attach brief file if provided (for comparison table only)
       if (briefFile) {
         const briefArrayBuffer = await briefFile.arrayBuffer()
         payload.briefFileBuffer = Array.from(new Uint8Array(briefArrayBuffer))
@@ -66,65 +65,98 @@ export default function UploadScreen({ onOpenSettings, onResult }) {
       </header>
 
       <main className="upload-main">
-        <div className="upload-card">
-          <input
-            className="project-name-input"
-            type="text"
-            placeholder="Project name (e.g. Lay's Saudi — Q3 Campaign)"
-            value={projectName}
-            onChange={(e) => setProjectName(e.target.value)}
-          />
-
-          {/* Treatment upload */}
-          <div className="upload-section-label">Director's Treatment</div>
-          <DropZone
-            label="Drop the director's treatment here"
-            onFile={(file) => { setTreatmentFile(file); setPastedText('') }}
-            uploadedFile={treatmentFile}
-            onClear={() => setTreatmentFile(null)}
-          />
-
-          <div className="divider"><span>or paste your treatment below</span></div>
-
-          <textarea
-            className="paste-area"
-            placeholder="Paste the treatment text here..."
-            value={pastedText}
-            onChange={(e) => { setPastedText(e.target.value); if (e.target.value) setTreatmentFile(null) }}
-            rows={8}
-          />
-
-          {/* Brief / Storyboard upload — optional */}
-          <div className="upload-section-label" style={{ marginTop: 4 }}>
-            Agency Brief / Storyboard
-            <span className="upload-section-optional">optional — adds a differences table</span>
+        <div className="upload-container">
+          <div className="project-head">
+            <input
+              className="project-title-input"
+              type="text"
+              placeholder="Untitled project"
+              value={projectName}
+              onChange={(e) => setProjectName(e.target.value)}
+            />
+            <p className="project-subtitle">Production breakdown</p>
           </div>
-          <DropZone
-            label="Drop the agency brief or storyboard here"
-            onFile={(file) => setBriefFile(file)}
-            uploadedFile={briefFile}
-            onClear={() => setBriefFile(null)}
-          />
 
-          <div className="divider"><span>producer's notes</span></div>
+          <div className="source-grid">
+            <section className="source-card source-card--primary">
+              <header className="source-head">
+                <span className="source-label">Director's Treatment</span>
+                <span className="source-tag source-tag--required">Required</span>
+              </header>
 
-          <textarea
-            className="paste-area"
-            placeholder="Add any remarks about how you're approaching this project — budget range, creative direction, client concerns, market, timeline, anything Claude should factor in..."
-            value={producerNotes}
-            onChange={(e) => setProducerNotes(e.target.value)}
-            rows={4}
-          />
+              <div className="segmented">
+                <button
+                  className={`segment ${treatmentMode === 'file' ? 'segment--on' : ''}`}
+                  onClick={() => setTreatmentMode('file')}
+                >
+                  Upload
+                </button>
+                <button
+                  className={`segment ${treatmentMode === 'text' ? 'segment--on' : ''}`}
+                  onClick={() => setTreatmentMode('text')}
+                >
+                  Paste
+                </button>
+              </div>
+
+              {treatmentMode === 'file' ? (
+                <DropZone
+                  label="Drop the treatment here"
+                  onFile={(file) => { setTreatmentFile(file); setPastedText('') }}
+                  uploadedFile={treatmentFile}
+                  onClear={() => setTreatmentFile(null)}
+                />
+              ) : (
+                <textarea
+                  className="paste-area"
+                  placeholder="Paste the treatment text…"
+                  value={pastedText}
+                  onChange={(e) => { setPastedText(e.target.value); if (e.target.value) setTreatmentFile(null) }}
+                  rows={9}
+                />
+              )}
+            </section>
+
+            <section className="source-card">
+              <header className="source-head">
+                <span className="source-label">Agency Brief</span>
+                <span className="source-tag">Optional</span>
+              </header>
+
+              <p className="source-hint">Adds a treatment-vs-brief differences table.</p>
+
+              <DropZone
+                label="Drop the brief or storyboard here"
+                onFile={(file) => setBriefFile(file)}
+                uploadedFile={briefFile}
+                onClear={() => setBriefFile(null)}
+              />
+            </section>
+          </div>
+
+          <details className="notes-block">
+            <summary className="notes-summary">
+              <span className="notes-chevron" aria-hidden="true">›</span>
+              Producer's notes
+              <span className="notes-optional">optional</span>
+            </summary>
+            <textarea
+              className="paste-area paste-area--notes"
+              placeholder="Budget range, creative direction, client concerns, market, timeline — anything to factor in."
+              value={producerNotes}
+              onChange={(e) => setProducerNotes(e.target.value)}
+              rows={4}
+            />
+          </details>
 
           {error && <div className="error-msg">⚠️ {error}</div>}
 
-          <button
-            className="analyze-btn"
-            disabled={!hasContent}
-            onClick={handleAnalyze}
-          >
-            Analyze Brief
-          </button>
+          <div className="analyze-row">
+            <button className="analyze-btn" disabled={!hasContent} onClick={handleAnalyze}>
+              Analyze Brief
+            </button>
+            {!hasContent && <span className="analyze-hint">Add a treatment to continue</span>}
+          </div>
         </div>
       </main>
     </div>

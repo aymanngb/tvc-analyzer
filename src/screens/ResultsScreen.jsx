@@ -52,6 +52,11 @@ function parseAtAGlance(result) {
   return match ? match[1].trim() : null
 }
 
+function parseStory(result) {
+  const match = result.match(/## Story\s*\n([\s\S]*?)(?=\n## |$)/)
+  return match ? match[1].trim() : null
+}
+
 function countComplexity(content) {
   const high = (content.match(/🔴/g) || []).length
   const med = (content.match(/🟡/g) || []).length
@@ -98,6 +103,11 @@ function buildPrintHTML(result, meta = {}) {
   const glanceMd = parseAtAGlance(result)
   const glance = glanceMd
     ? `<div class="glance"><div class="glance-title">At a Glance</div>${mdTableToHtml(glanceMd)}</div>`
+    : ''
+
+  const storyMd = parseStory(result)
+  const story = storyMd
+    ? `<div class="story"><div class="story-title">Story</div>${mdTableToHtml(storyMd)}</div>`
     : ''
 
   const abbrevRows = ABBREV_KEY.map(([abbr, meaning]) =>
@@ -157,6 +167,14 @@ function buildPrintHTML(result, meta = {}) {
   .abbrev-grid td { border: none; border-bottom: 1px solid #eee; font-size: 8.5px; padding: 3px 8px; }
   .abbrev-grid td.abbr-key { font-weight: 700; color: #444; width: 36px; white-space: nowrap; }
 
+  /* ── Story ── */
+  .story { margin-bottom: 12px; border: 1px solid #bbb; border-radius: 6px; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
+  .story-title { background: #333; color: #fff; padding: 5px 12px; font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; }
+  .story table { border: none; }
+  .story thead { display: none; }
+  .story td { border: none; border-bottom: 1px solid #eee; font-size: 10px; padding: 5px 12px; }
+  .story td:first-child { width: 22px; font-weight: 700; color: #888; }
+
   /* ── At a Glance ── */
   .glance { margin-bottom: 16px; border: 1.5px solid #99CC00; border-radius: 6px; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
   .glance-title { background: #99CC00; color: #fff; padding: 5px 12px; font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; }
@@ -182,6 +200,7 @@ function buildPrintHTML(result, meta = {}) {
 </div>
 
 ${badge}
+${story}
 ${glance}
 ${tables}
 ${ep}
@@ -204,6 +223,10 @@ ${ep}
 function buildSheets(result) {
   const sheets = []
 
+  const storyMd = parseStory(result)
+  const story = storyMd ? parseMarkdownTable(storyMd) : null
+  if (story) sheets.push({ name: 'Story', headers: story.headers, rows: story.rows })
+
   const glanceMd = parseAtAGlance(result)
   const glance = glanceMd ? parseMarkdownTable(glanceMd) : null
   if (glance) {
@@ -221,6 +244,10 @@ function buildSheets(result) {
   return sheets
 }
 
+function slug(title) {
+  return 'sec-' + title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+}
+
 export default function ResultsScreen({ result, projectMeta = {}, onNewBrief }) {
   const extractedName = parseProjectName(result)
   const projectName = extractedName || projectMeta.name || 'Production Breakdown'
@@ -229,6 +256,53 @@ export default function ResultsScreen({ result, projectMeta = {}, onNewBrief }) 
   const sections = parseSections(result)
   const epNote = parseEPNote(result)
   const glance = parseMarkdownTable(parseAtAGlance(result) || '')
+  const story = parseMarkdownTable(parseStory(result) || '')
+
+  const nav = [
+    ...(story ? [{ id: 'sec-story', label: 'Story' }] : []),
+    ...(glance ? [{ id: 'sec-glance', label: 'At a Glance' }] : []),
+    // Rail shows the table's name, not its number: "Props & Hero Items", not "Table 3".
+    ...sections.map((s) => ({ id: slug(s.title), label: s.title.replace(/^Table\s*\d+\s*[—-]\s*/, ''), full: s.title })),
+    ...(epNote ? [{ id: 'sec-ep', label: 'EP Note' }] : []),
+  ]
+
+  const [active, setActive] = React.useState(nav[0]?.id)
+  const scrollRef = React.useRef(null)
+
+  // Highlight the last section whose top has passed the container top. Checked
+  // directly against layout rather than via IntersectionObserver, which misses
+  // the end of the list once nothing intersects the top band.
+  React.useEffect(() => {
+    const root = scrollRef.current
+    if (!root) return
+    let frame = 0
+
+    function update() {
+      frame = 0
+      const rootTop = root.getBoundingClientRect().top
+      let current = nav[0]?.id
+      for (const { id } of nav) {
+        const el = document.getElementById(id)
+        if (el && el.getBoundingClientRect().top - rootTop <= 80) current = id
+      }
+      if (root.scrollTop >= root.scrollHeight - root.clientHeight - 2) {
+        current = nav[nav.length - 1]?.id     // bottom of scroll: last section wins
+      }
+      setActive(current)
+    }
+
+    function onScroll() { if (!frame) frame = requestAnimationFrame(update) }
+    root.addEventListener('scroll', onScroll, { passive: true })
+    update()
+    return () => { root.removeEventListener('scroll', onScroll); if (frame) cancelAnimationFrame(frame) }
+  }, [result])
+
+  function jumpTo(id) {
+    const el = document.getElementById(id)
+    if (!el) return
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
+  }
 
   async function handleExport() {
     const html = buildPrintHTML(result, { name: projectName, date: projectDate })
@@ -242,9 +316,7 @@ export default function ResultsScreen({ result, projectMeta = {}, onNewBrief }) 
   }
 
   return (
-    <div style={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', background: '#0f0f0f' }}>
-
-      {/* Top bar with logo */}
+    <div className="results-screen">
       <div className="results-topbar">
         <button className="back-btn" onClick={onNewBrief}>← New Brief</button>
         <div className="results-title-block">
@@ -260,56 +332,84 @@ export default function ResultsScreen({ result, projectMeta = {}, onNewBrief }) 
         </div>
       </div>
 
-      <div style={{ flex: 1, overflowY: 'scroll', padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-        {docType && (
-          <div className="doctype-badge" style={{ backgroundColor: docType.color + '22', borderColor: docType.color, color: docType.color }}>
-            {docType.label}
-          </div>
-        )}
+      <div className="results-layout">
+        <nav className="results-rail" aria-label="Sections">
+          {docType && (
+            <div className="rail-doctype" style={{ color: docType.color, borderColor: docType.color + '55' }}>
+              {docType.label}
+            </div>
+          )}
+          {nav.map(({ id, label, full }) => (
+            <button
+              key={id}
+              className={`rail-item ${active === id ? 'rail-item--on' : ''}`}
+              onClick={() => jumpTo(id)}
+              title={full || label}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
 
-        {glance && (
-          <div className="glance-card">
-            <div className="glance-card-title">At a Glance</div>
-            <table className="glance-table">
-              <tbody>
-                {glance.rows.map((row, i) => (
-                  <tr key={i}>
-                    <td className="glance-item">{row[0]}</td>
-                    <td className="glance-detail">{row[1]}</td>
-                  </tr>
+        <div className="results-body" ref={scrollRef}>
+          {story && (
+            <section id="sec-story" className="story-card">
+              <div className="card-title">Story</div>
+              <ol className="story-beats">
+                {story.rows.map((row, i) => (
+                  <li key={i}><span className="beat-n">{row[0]}</span><span className="beat-t">{row[1]}</span></li>
                 ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+              </ol>
+            </section>
+          )}
 
-        {sections.map((section, i) => (
-          <AnalysisTable
-            key={i}
-            title={section.title}
-            content={section.content}
-            badgeSummary={countComplexity(section.content)}
-          />
-        ))}
+          {glance && (
+            <section id="sec-glance" className="glance-card">
+              <div className="glance-card-title">At a Glance</div>
+              <table className="glance-table">
+                <tbody>
+                  {glance.rows.map((row, i) => (
+                    <tr key={i}>
+                      <td className="glance-item">{row[0]}</td>
+                      <td className="glance-detail">{row[1]}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          )}
 
-        {epNote && (
-          <div className="ep-note">
-            <span className="ep-label">EP Note</span>
-            <p>{epNote}</p>
-          </div>
-        )}
+          {sections.map((section, i) => (
+            <div id={slug(section.title)} key={i}>
+              <AnalysisTable
+                title={section.title}
+                content={section.content}
+                badgeSummary={countComplexity(section.content)}
+              />
+            </div>
+          ))}
 
-        {/* Abbreviations Key */}
-        <div className="abbrev-key-card">
-          <div className="abbrev-key-title">Abbreviations Key</div>
-          <div className="abbrev-key-grid">
-            {ABBREV_KEY.map(([abbr, meaning]) => (
-              <div className="abbrev-item" key={abbr}>
-                <span className="abbrev-short">{abbr}</span>
-                <span className="abbrev-meaning">{meaning}</span>
-              </div>
-            ))}
-          </div>
+          {epNote && (
+            <section id="sec-ep" className="ep-note">
+              <span className="ep-label">EP Note</span>
+              <p>{epNote}</p>
+            </section>
+          )}
+
+          <details className="abbrev-block">
+            <summary className="abbrev-summary">
+              <span className="notes-chevron" aria-hidden="true">›</span>
+              Abbreviations
+            </summary>
+            <div className="abbrev-key-grid">
+              {ABBREV_KEY.map(([abbr, meaning]) => (
+                <div className="abbrev-item" key={abbr}>
+                  <span className="abbrev-short">{abbr}</span>
+                  <span className="abbrev-meaning">{meaning}</span>
+                </div>
+              ))}
+            </div>
+          </details>
         </div>
       </div>
     </div>

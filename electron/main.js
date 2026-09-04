@@ -115,6 +115,11 @@ CELL RULES:
 ## Document Type
 [Agency Brief / Director's Treatment / Hybrid — 5 words max on complexity driver]
 
+## Story
+| # | Beat |
+3-5 rows, in screen order. Present tense, max 8 words per beat. What the viewer actually sees.
+No interpretation, no brand messaging — just what happens.
+
 ## Table 1 — Production Requirements Overview
 | Category | Stated | Implied | Why Implied | Complexity |
 Use: 🟢 Low / 🟡 Medium / 🔴 High
