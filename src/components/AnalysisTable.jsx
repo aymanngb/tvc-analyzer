@@ -19,6 +19,11 @@ function Cell({ content }) {
 export default function AnalysisTable({ title, content, badgeSummary }) {
   const [collapsed, setCollapsed] = useState(false)
   const table = parseMarkdownTable(content)
+  // Only group by the first column when it actually repeats (e.g. Location).
+  // Tables keyed by a running "#" have a unique first cell per row, so grouping
+  // there would draw a separator before every single row.
+  const groupsByFirstCol =
+    !!table && new Set(table.rows.map((r) => r[0])).size < table.rows.length
 
   return (
     <div className="table-section">
@@ -41,7 +46,8 @@ export default function AnalysisTable({ title, content, badgeSummary }) {
               </thead>
               <tbody>
                 {table.rows.map((row, ri) => {
-                  const isNewGroup = ri > 0 && row[0] && row[0] !== table.rows[ri - 1][0]
+                  const isNewGroup =
+                    groupsByFirstCol && ri > 0 && row[0] && row[0] !== table.rows[ri - 1][0]
                   return (
                     <React.Fragment key={ri}>
                       {isNewGroup && (

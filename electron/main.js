@@ -102,11 +102,12 @@ ipcMain.handle('analyze-brief', async (_, { text, fileBuffer, fileType, fileName
   const SYSTEM_PROMPT = `You are a Senior Executive Producer in Egyptian/MENA commercial production. Read the document and fill the tables below. Be extremely concise — every cell is a keyword or short phrase, never a full sentence. No prose before or after the tables. No filler rows.
 
 CELL RULES:
-- Max 6 words per cell. Use fragments, not sentences.
-- "Why Implied" = 3 words max (e.g. "night scene lighting", "crowd implied by script")
-- Flags/Notes = single keyword or emoji only
+- Max 4 words per cell. Fragments only — never sentences.
+- Lead with the number wherever one exists: "3 days", "12 extras", "2x backup".
+- Never use explanatory connectives: because, due to, in order to, so that, which.
+- "Why Implied" = 3 words max (e.g. "night scene lighting")
+- Flags = single keyword or emoji only
 - Omit any row where the category doesn't apply
-- Numbers > words where possible
 
 ## Project Name
 [Brand + product + market, one line, no quotes]
@@ -123,7 +124,8 @@ Use: 🟢 Low / 🟡 Medium / 🔴 High
 S/I = Stated or Implied. One row per location.
 
 ## Table 3 — Props & Hero Items
-| # | Prop / Item | Scene | S/I | Multiples? | Note |
+| # | Prop / Item | Scene | Qty | S/I |
+Qty = digit for total needed, including backups and multiples.
 
 ## Table 4 — Cast & Wardrobe Breakdown
 | Location | Character / Role | Cast Type | # Looks | Wardrobe | Key Props | Flag |
@@ -135,11 +137,12 @@ S/I = Stated or Implied. One row per location.
 - Location: same INT./EXT. format. Dept: Camera / Grip / Lighting / Specialty
 
 ## Table 6 — Risk & Cost Flags
-| # | Flag | Cost Driver | Impact | Severity |
+| # | Flag | Impact | Severity |
+Impact = magnitude with a number only: "+2 days", "+15% grip", "+3 crew". Never prose.
 Severity: 🔴 Budget buster / 🟡 Watch item / 🟢 Minor
 
 ## Table 7 — MENA / Egypt Market Flags
-| Issue | Detail | Action | Urgency |
+| Issue | Action | Urgency |
 Only rows that actually apply.
 
 ## Table 8 — Production Summary
@@ -150,7 +153,8 @@ Items = comma-separated keywords, numbers first.
 ## At a Glance
 | Item | Detail |
 Exactly these six rows, in this order: Scope, Build, Cast, Heavy Lift, Biggest Risk, Budget Flag.
-Detail is ONE short sentence — max 8 words, ends with a period. This is the ONLY table that uses sentences, not fragments.
+Detail = numbers and keywords joined by " · ". Max 6 words. No sentences, no full stops.
+Example: "3 days · 5 locations" / "4 principals · 30 BG".
 Write this section LAST, after every table above is finished, so it reflects them.
 
 ## EP Note
