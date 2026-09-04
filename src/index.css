@@ -212,6 +212,11 @@ body { height: 100%; overflow: hidden; font-family: var(--font); background: var
 .ep-label { font-size: 11px; font-weight: 700; color: #99CC00; text-transform: uppercase; letter-spacing: 0.8px; }
 .ep-note p { font-size: 14px; line-height: 1.6; font-style: italic; color: #ddd; }
 
+/* ── Export Buttons ────────────────────────────────────────────────────────── */
+.export-actions { display: flex; align-items: center; gap: 8px; }
+.export-btn--alt { background: transparent; border: 1px solid #99CC00; color: #99CC00; }
+.export-btn--alt:hover { background: #99CC0018; }
+
 /* ── At a Glance ───────────────────────────────────────────────────────────── */
 .glance-card {
   background: var(--card); border: 1px solid #99CC00; border-radius: var(--radius);

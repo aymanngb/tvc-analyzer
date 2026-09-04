@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.20.0",
+    "exceljs": "^4.4.0",
     "mammoth": "^1.6.0",
     "pdf-parse": "^1.1.1",
     "react": "^18.2.0",
@@ -30,13 +31,24 @@
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "public/logo.png",
-      "target": [{ "target": "dmg", "arch": ["x64", "arm64"] }],
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
       "identity": null
     },
     "dmg": {
       "title": "TVC Brief Analyzer",
       "background": null,
-      "window": { "width": 540, "height": 380 }
+      "window": {
+        "width": 540,
+        "height": 380
+      }
     },
     "files": [
       "dist/**/*",

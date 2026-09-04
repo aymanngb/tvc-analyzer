@@ -201,6 +201,26 @@ ${ep}
 </html>`
 }
 
+function buildSheets(result) {
+  const sheets = []
+
+  const glanceMd = parseAtAGlance(result)
+  const glance = glanceMd ? parseMarkdownTable(glanceMd) : null
+  if (glance) {
+    const rows = [...glance.rows]
+    const epNote = parseEPNote(result)
+    if (epNote) rows.push(['EP Note', epNote])
+    sheets.push({ name: 'At a Glance', headers: glance.headers, rows })
+  }
+
+  parseSections(result).forEach((section) => {
+    const table = parseMarkdownTable(section.content)
+    if (table) sheets.push({ name: section.title, headers: table.headers, rows: table.rows })
+  })
+
+  return sheets
+}
+
 export default function ResultsScreen({ result, projectMeta = {}, onNewBrief }) {
   const extractedName = parseProjectName(result)
   const projectName = extractedName || projectMeta.name || 'Production Breakdown'
@@ -213,6 +233,12 @@ export default function ResultsScreen({ result, projectMeta = {}, onNewBrief }) 
   async function handleExport() {
     const html = buildPrintHTML(result, { name: projectName, date: projectDate })
     await window.electronAPI.exportPDF(html)
+  }
+
+  async function handleExportExcel() {
+    const sheets = buildSheets(result)
+    if (!sheets.length) return
+    await window.electronAPI.exportXLSX({ projectName, projectDate, sheets })
   }
 
   return (
@@ -228,7 +254,10 @@ export default function ResultsScreen({ result, projectMeta = {}, onNewBrief }) 
             {projectDate && <span className="results-date">{projectDate}</span>}
           </div>
         </div>
-        <button className="export-btn" onClick={handleExport}>Export PDF</button>
+        <div className="export-actions">
+          <button className="export-btn export-btn--alt" onClick={handleExportExcel}>Export Excel</button>
+          <button className="export-btn" onClick={handleExport}>Export PDF</button>
+        </div>
       </div>
 
       <div style={{ flex: 1, overflowY: 'scroll', padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>

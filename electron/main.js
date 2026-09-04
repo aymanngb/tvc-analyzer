@@ -256,6 +256,55 @@ Each row = one specific difference. Flag: 🔴 Major deviation / 🟡 Notable ch
   return result
 })
 
+// ── IPC: Export Excel ─────────────────────────────────────────────────────────
+
+ipcMain.handle('export-xlsx', async (_, { projectName, projectDate, sheets }) => {
+  const { filePath } = await dialog.showSaveDialog(mainWindow, {
+    defaultPath: `TVC-Breakdown-${Date.now()}.xlsx`,
+    filters: [{ name: 'Excel Workbook', extensions: ['xlsx'] }],
+  })
+
+  if (!filePath) return { cancelled: true }
+
+  const ExcelJS = require('exceljs')
+  const wb = new ExcelJS.Workbook()
+  wb.creator = 'TVC Brief Analyzer'
+  wb.title = projectName || 'Production Breakdown'
+  wb.created = new Date()
+
+  // Excel sheet names: max 31 chars, no []:*?/\\, must be unique
+  const used = new Set()
+  function sheetName(raw) {
+    const base = (raw || 'Sheet').replace(/[\[\]:*?\/\\]/g, '-').slice(0, 31).trim()
+    let name = base
+    let n = 2
+    while (used.has(name)) name = `${base.slice(0, 28)} ${n++}`
+    used.add(name)
+    return name
+  }
+
+  for (const sheet of sheets) {
+    const ws = wb.addWorksheet(sheetName(sheet.name))
+    ws.addRow(sheet.headers)
+    sheet.rows.forEach((row) => ws.addRow(row))
+
+    const header = ws.getRow(1)
+    header.font = { bold: true }
+    header.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF99CC00' } }
+    ws.views = [{ state: 'frozen', ySplit: 1 }]
+
+    sheet.headers.forEach((h, ci) => {
+      const widths = [String(h || '').length, ...sheet.rows.map((r) => String(r[ci] || '').length)]
+      const col = ws.getColumn(ci + 1)
+      col.width = Math.min(48, Math.max(10, Math.max(...widths) + 2))
+      col.alignment = { wrapText: true, vertical: 'top' }
+    })
+  }
+
+  await wb.xlsx.writeFile(filePath)
+  return { success: true, filePath }
+})
+
 // ── IPC: Export PDF ───────────────────────────────────────────────────────────
 
 ipcMain.handle('export-pdf', async (_, html) => {
