@@ -253,6 +253,16 @@ button { transition: transform var(--press), background var(--press), border-col
 .loading-stage.done { color: var(--text-2); }
 .stage-dot { width: 1rem; text-align: center; font-size: 11px; }
 
+/* Real progress while a large PDF is shrunk — transform-only so it stays on the compositor. */
+.loading-optimizing { width: 17.5rem; display: flex; flex-direction: column; gap: 0.625rem; }
+.optimizing-label { font-size: 13px; font-weight: 600; color: var(--text); letter-spacing: -0.005em; text-align: center; }
+.optimizing-track { height: 4px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.optimizing-fill {
+  height: 100%; background: var(--accent); transform-origin: left center;
+  transition: transform var(--move);
+}
+.optimizing-meta { font-size: 11px; color: var(--text-3); text-align: center; letter-spacing: 0.02em; font-variant-numeric: tabular-nums; }
+
 /* ══ Results ═════════════════════════════════════════════════════════════════ */
 .results-screen { position: fixed; inset: 0; display: flex; flex-direction: column; background: var(--bg); }
 .results-topbar { padding: 0.625rem 1.25rem; }

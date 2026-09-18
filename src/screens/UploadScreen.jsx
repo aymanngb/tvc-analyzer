@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import DropZone from '../components/DropZone'
 import LoadingState from '../components/LoadingState'
+import { needsCompression, isPdf, BUDGET_ALONE, BUDGET_PAIRED } from '../lib/pdfBudget'
 
 export default function UploadScreen({ onOpenSettings, onResult }) {
   const [projectName, setProjectName] = useState('')
@@ -10,22 +11,42 @@ export default function UploadScreen({ onOpenSettings, onResult }) {
   const [briefFile, setBriefFile] = useState(null)
   const [producerNotes, setProducerNotes] = useState('')
   const [loading, setLoading] = useState(false)
+  const [progress, setProgress] = useState(null)   // { label, done, total } while shrinking a PDF
   const [error, setError] = useState(null)
 
   const hasContent = pastedText.trim().length > 0 || treatmentFile !== null
+
+  // Oversized PDFs are shrunk to fit the API's request cap; everything else is
+  // passed through untouched. Bytes cross IPC as a Uint8Array, which structured
+  // clone copies natively; a plain Array of numbers was ~2.6x larger and slow.
+  async function prepare(file, budget, label) {
+    const type = isPdf(file) ? 'application/pdf' : file.type
+    if (needsCompression(file, budget)) {
+      setProgress({ label, done: 0, total: 0 })
+      const { compressPdf } = await import('../lib/compressPdf')   // loaded only when needed
+      const out = await compressPdf(file, budget, (done, total) => setProgress({ label, done, total }))
+      setProgress(null)
+      return { bytes: out.bytes, type, text: out.text }
+    }
+    return { bytes: new Uint8Array(await file.arrayBuffer()), type, text: '' }
+  }
 
   async function handleAnalyze() {
     setError(null)
     setLoading(true)
 
     try {
+      // Treatment and brief travel in one request for Table 9, so they split the budget.
+      const budget = briefFile ? BUDGET_PAIRED : BUDGET_ALONE
+
       let payload = {}
       if (treatmentFile) {
-        const arrayBuffer = await treatmentFile.arrayBuffer()
+        const t = await prepare(treatmentFile, budget, 'Optimizing treatment')
         payload = {
-          fileBuffer: Array.from(new Uint8Array(arrayBuffer)),
-          fileType: treatmentFile.type,
+          fileBuffer: t.bytes,
+          fileType: t.type,
           fileName: treatmentFile.name,
+          fileText: t.text,
           text: '',
           producerNotes,
         }
@@ -34,10 +55,11 @@ export default function UploadScreen({ onOpenSettings, onResult }) {
       }
 
       if (briefFile) {
-        const briefArrayBuffer = await briefFile.arrayBuffer()
-        payload.briefFileBuffer = Array.from(new Uint8Array(briefArrayBuffer))
-        payload.briefFileType = briefFile.type
+        const b = await prepare(briefFile, BUDGET_PAIRED, 'Optimizing brief')
+        payload.briefFileBuffer = b.bytes
+        payload.briefFileType = b.type
         payload.briefFileName = briefFile.name
+        payload.briefFileText = b.text
       }
 
       if (!window.electronAPI) {
@@ -48,11 +70,12 @@ export default function UploadScreen({ onOpenSettings, onResult }) {
     } catch (err) {
       setError(err.message || 'Analysis failed. Check your API key in Settings.')
     } finally {
+      setProgress(null)
       setLoading(false)
     }
   }
 
-  if (loading) return <LoadingState />
+  if (loading) return <LoadingState progress={progress} />
 
   return (
     <div className="upload-screen">

@@ -35,6 +35,9 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // Large treatments are compressed page by page in the renderer; keep that
+      // at full speed when the user switches to another app while it runs.
+      backgroundThrottling: false,
     },
   })
 
@@ -83,9 +86,32 @@ ipcMain.handle('get-api-key', () => {
   return config.apiKey || ''
 })
 
+// ── Request helpers ───────────────────────────────────────────────────────────
+
+// Large PDFs arrive rasterized to images, which drops their text layer; the
+// renderer extracts that text separately so small print isn't lost to the JPEG.
+function textLayerBlock(extracted) {
+  if (!extracted || !extracted.trim()) return []
+  return [{
+    type: 'text',
+    text: `Text layer extracted from the PDF above, page by page. The pages were compressed to images, so use this for exact wording, names and numbers:\n\n${extracted}`,
+  }]
+}
+
+// The API rejects requests over 32 MB. Catch it here with a message a producer
+// can act on, rather than surfacing a raw 413.
+const REQUEST_LIMIT = 32 * 1024 * 1024
+function assertRequestSize(parts) {
+  const bytes = Buffer.byteLength(JSON.stringify(parts), 'utf8')
+  if (bytes > REQUEST_LIMIT * 0.97) {
+    const mb = (bytes / 1048576).toFixed(0)
+    throw new Error(`These files are too large to analyze together (${mb} MB, limit 32 MB). Try the treatment on its own, or export a smaller PDF.`)
+  }
+}
+
 // ── IPC: Analyze Brief ────────────────────────────────────────────────────────
 
-ipcMain.handle('analyze-brief', async (_, { text, fileBuffer, fileType, fileName, producerNotes, briefFileBuffer, briefFileType, briefFileName }) => {
+ipcMain.handle('analyze-brief', async (_, { text, fileBuffer, fileType, fileName, fileText, producerNotes, briefFileBuffer, briefFileType, briefFileName, briefFileText }) => {
   const config = readConfig()
   let apiKey = ''
   if (config.apiKeyEncrypted && safeStorage.isEncryptionAvailable()) {
@@ -182,6 +208,7 @@ Write this section LAST, after every table above is finished, so it reflects the
     const base64 = Buffer.from(fileBuffer).toString('base64')
     messageContent = [
       { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } },
+      ...textLayerBlock(fileText),
       { type: 'text', text: `Analyze this brief:${notesBlock}` },
     ]
   } else {
@@ -197,6 +224,7 @@ Write this section LAST, after every table above is finished, so it reflects the
     messageContent = `Analyze this brief:${notesBlock}\n\n${content}`
   }
 
+  assertRequestSize(messageContent)
   const response = await client.messages.create({
     model: 'claude-opus-4-8',
     max_tokens: 16000,
@@ -219,6 +247,7 @@ Write this section LAST, after every table above is finished, so it reflects the
       const base64 = Buffer.from(briefFileBuffer).toString('base64')
       briefContent = [
         { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } },
+        ...textLayerBlock(briefFileText),
         { type: 'text', text: 'This is the agency brief / storyboard.' },
       ]
     } else {
@@ -245,6 +274,7 @@ Output ONLY this single markdown table. No prose before or after.
 | # | Topic | In the Brief | In the Treatment | Production Impact | Flag |
 Each row = one specific difference. Flag: 🔴 Major deviation / 🟡 Notable change / 🟢 Minor variation`
 
+    assertRequestSize([messageContent, result, briefContent])
     const compareResponse = await client.messages.create({
       model: 'claude-opus-4-8',
       max_tokens: 8192,
