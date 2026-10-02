@@ -1,18 +1,32 @@
 const { app, BrowserWindow, ipcMain, dialog, safeStorage } = require('electron')
 const path = require('path')
 const fs = require('fs')
+const {
+  migrateConfig, withProviderKeyEncrypted, withProviderKeyPlain,
+  withActiveProvider, withProviderModel, getKeyMaterial, settingsView,
+} = require('./config')
+const { getProvider, PROVIDER_IDS } = require('./providers')
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 const configPath = path.join(app.getPath('userData'), 'config.json')
 
 function readConfig() {
+  let raw = {}
   try {
-    if (!fs.existsSync(configPath)) return {}
-    const raw = fs.readFileSync(configPath)
-    return JSON.parse(raw)
+    if (fs.existsSync(configPath)) raw = JSON.parse(fs.readFileSync(configPath))
   } catch {
-    return {}
+    raw = {}
   }
+  const migrated = migrateConfig(raw)
+  if (!raw.providers) writeConfig(migrated)
+  return migrated
+}
+
+function decryptKey(keyMaterial) {
+  if (keyMaterial.apiKeyEncrypted && safeStorage.isEncryptionAvailable()) {
+    return safeStorage.decryptString(Buffer.from(keyMaterial.apiKeyEncrypted, 'base64'))
+  }
+  return keyMaterial.apiKey || ''
 }
 
 function writeConfig(data) {
@@ -64,26 +78,34 @@ app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow()
 })
 
-// ── IPC: API Key ──────────────────────────────────────────────────────────────
+// ── IPC: Settings ──────────────────────────────────────────────────────────────
 
-ipcMain.handle('save-api-key', (_, key) => {
+ipcMain.handle('get-settings', () => {
+  return settingsView(readConfig())
+})
+
+ipcMain.handle('get-provider-key', (_, providerId) => {
   const config = readConfig()
-  if (safeStorage.isEncryptionAvailable()) {
-    config.apiKeyEncrypted = safeStorage.encryptString(key).toString('base64')
-    delete config.apiKey
-  } else {
-    config.apiKey = key
-  }
-  writeConfig(config)
+  return decryptKey(getKeyMaterial(config, providerId))
+})
+
+ipcMain.handle('save-provider-key', (_, providerId, key) => {
+  const config = readConfig()
+  const updated = safeStorage.isEncryptionAvailable()
+    ? withProviderKeyEncrypted(config, providerId, safeStorage.encryptString(key).toString('base64'))
+    : withProviderKeyPlain(config, providerId, key)
+  writeConfig(updated)
   return true
 })
 
-ipcMain.handle('get-api-key', () => {
-  const config = readConfig()
-  if (config.apiKeyEncrypted && safeStorage.isEncryptionAvailable()) {
-    return safeStorage.decryptString(Buffer.from(config.apiKeyEncrypted, 'base64'))
-  }
-  return config.apiKey || ''
+ipcMain.handle('set-active-provider', (_, providerId) => {
+  writeConfig(withActiveProvider(readConfig(), providerId))
+  return true
+})
+
+ipcMain.handle('set-provider-model', (_, providerId, modelId) => {
+  writeConfig(withProviderModel(readConfig(), providerId, modelId))
+  return true
 })
 
 // ── Request helpers ───────────────────────────────────────────────────────────
