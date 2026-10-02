@@ -1,18 +1,35 @@
 const { app, BrowserWindow, ipcMain, dialog, safeStorage } = require('electron')
 const path = require('path')
 const fs = require('fs')
+const {
+  migrateConfig, withProviderKeyEncrypted, withProviderKeyPlain,
+  withActiveProvider, withProviderModel, getKeyMaterial, settingsView, missingKeyMessage,
+} = require('./config')
+const { getProvider, PROVIDER_IDS } = require('./providers')
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 const configPath = path.join(app.getPath('userData'), 'config.json')
 
 function readConfig() {
+  let raw = {}
   try {
-    if (!fs.existsSync(configPath)) return {}
-    const raw = fs.readFileSync(configPath)
-    return JSON.parse(raw)
+    if (fs.existsSync(configPath)) raw = JSON.parse(fs.readFileSync(configPath))
   } catch {
-    return {}
+    raw = {}
   }
+  // migrateConfig also normalizes an already-migrated config (e.g. filling in a
+  // provider added to the registry after this config was last written), so the
+  // on-disk file always needs refreshing, not just on the old-shape -> new-shape path.
+  const migrated = migrateConfig(raw)
+  writeConfig(migrated)
+  return migrated
+}
+
+function decryptKey(keyMaterial) {
+  if (keyMaterial.apiKeyEncrypted && safeStorage.isEncryptionAvailable()) {
+    return safeStorage.decryptString(Buffer.from(keyMaterial.apiKeyEncrypted, 'base64'))
+  }
+  return keyMaterial.apiKey || ''
 }
 
 function writeConfig(data) {
@@ -96,39 +113,37 @@ ipcMain.handle('choose-source-file', async () => {
   }
 })
 
-// ── IPC: API Key ──────────────────────────────────────────────────────────────
+// ── IPC: Settings ──────────────────────────────────────────────────────────────
 
-ipcMain.handle('save-api-key', (_, key) => {
+ipcMain.handle('get-settings', () => {
+  return settingsView(readConfig())
+})
+
+ipcMain.handle('get-provider-key', (_, providerId) => {
   const config = readConfig()
-  if (safeStorage.isEncryptionAvailable()) {
-    config.apiKeyEncrypted = safeStorage.encryptString(key).toString('base64')
-    delete config.apiKey
-  } else {
-    config.apiKey = key
-  }
-  writeConfig(config)
+  return decryptKey(getKeyMaterial(config, providerId))
+})
+
+ipcMain.handle('save-provider-key', (_, providerId, key) => {
+  const config = readConfig()
+  const updated = safeStorage.isEncryptionAvailable()
+    ? withProviderKeyEncrypted(config, providerId, safeStorage.encryptString(key).toString('base64'))
+    : withProviderKeyPlain(config, providerId, key)
+  writeConfig(updated)
   return true
 })
 
-ipcMain.handle('get-api-key', () => {
-  const config = readConfig()
-  if (config.apiKeyEncrypted && safeStorage.isEncryptionAvailable()) {
-    return safeStorage.decryptString(Buffer.from(config.apiKeyEncrypted, 'base64'))
-  }
-  return config.apiKey || ''
+ipcMain.handle('set-active-provider', (_, providerId) => {
+  writeConfig(withActiveProvider(readConfig(), providerId))
+  return true
+})
+
+ipcMain.handle('set-provider-model', (_, providerId, modelId) => {
+  writeConfig(withProviderModel(readConfig(), providerId, modelId))
+  return true
 })
 
 // ── Request helpers ───────────────────────────────────────────────────────────
-
-// Large PDFs arrive rasterized to images, which drops their text layer; the
-// renderer extracts that text separately so small print isn't lost to the JPEG.
-function textLayerBlock(extracted) {
-  if (!extracted || !extracted.trim()) return []
-  return [{
-    type: 'text',
-    text: `Text layer extracted from the PDF above, page by page. The pages were compressed to images, so use this for exact wording, names and numbers:\n\n${extracted}`,
-  }]
-}
 
 // The API rejects requests over 32 MB. Catch it here with a message a producer
 // can act on, rather than surfacing a raw 413.
@@ -141,21 +156,26 @@ function assertRequestSize(parts) {
   }
 }
 
+// Adapters throw an OUTPUT_TRUNCATED error when a response hit its token limit.
+async function generateOrExplain(provider, args, truncatedMessage) {
+  try {
+    return await provider.generate(args)
+  } catch (err) {
+    if (err.code === 'OUTPUT_TRUNCATED') throw new Error(truncatedMessage)
+    throw err
+  }
+}
+
 // ── IPC: Analyze Brief ────────────────────────────────────────────────────────
 
 ipcMain.handle('analyze-brief', async (_, { text, fileBuffer, fileType, fileName, fileText, producerNotes, briefFileBuffer, briefFileType, briefFileName, briefFileText }) => {
   const config = readConfig()
-  let apiKey = ''
-  if (config.apiKeyEncrypted && safeStorage.isEncryptionAvailable()) {
-    apiKey = safeStorage.decryptString(Buffer.from(config.apiKeyEncrypted, 'base64'))
-  } else {
-    apiKey = config.apiKey || ''
-  }
+  const provider = getProvider(config.activeProvider)
+  const apiKey = decryptKey(getKeyMaterial(config, config.activeProvider))
 
-  if (!apiKey) throw new Error('No API key configured. Open Settings and add your Anthropic API key.')
+  if (!apiKey) throw new Error(missingKeyMessage(provider.label))
 
-  const Anthropic = require('@anthropic-ai/sdk')
-  const client = new Anthropic.default({ apiKey })
+  const model = config.providers[config.activeProvider].model
 
   const SYSTEM_PROMPT = `You are an executive producer reading a TV commercial treatment or brief. Produce the shortest useful, source-grounded production report. Read the whole document before writing. Prioritize understanding the story, confirmed scope, major production drivers, and unresolved decisions.
 
@@ -220,20 +240,19 @@ Only additional actionable details not already captured above: specific props, c
     ? `\n\nPRODUCER'S NOTES (factor these into every table — they reflect how the team is approaching this project):\n${producerNotes.trim()}`
     : ''
 
-  let messageContent
+  let mainParts
 
   if (fileBuffer && fileType && fileType.startsWith('image/')) {
     const base64 = Buffer.from(fileBuffer).toString('base64')
-    messageContent = [
-      { type: 'image', source: { type: 'base64', media_type: fileType, data: base64 } },
+    mainParts = [
+      { type: 'image', mediaType: fileType, base64 },
       { type: 'text', text: `Analyze this brief:${notesBlock}` },
     ]
   } else if (fileBuffer && fileType === 'application/pdf') {
-    // Send PDF directly to Claude — works for both text and image-based PDFs
+    // Send the PDF directly — works for both text and image-based PDFs
     const base64 = Buffer.from(fileBuffer).toString('base64')
-    messageContent = [
-      { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } },
-      ...textLayerBlock(fileText),
+    mainParts = [
+      { type: 'pdf', base64, extractedText: fileText },
       { type: 'text', text: `Analyze this brief:${notesBlock}` },
     ]
   } else {
@@ -246,21 +265,18 @@ Only additional actionable details not already captured above: specific props, c
     }
 
     if (!content.trim()) throw new Error('Could not extract text from the uploaded file.')
-    messageContent = `Analyze this brief:${notesBlock}\n\n${content}`
+    mainParts = [{ type: 'text', text: `Analyze this brief:${notesBlock}\n\n${content}` }]
   }
 
-  assertRequestSize(messageContent)
-  const response = await client.messages.create({
-    model: 'claude-opus-4-8',
-    max_tokens: 4500,
+  assertRequestSize(mainParts)
+  let result = await generateOrExplain(provider, {
+    apiKey,
+    model,
     system: SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: messageContent }],
-  })
+    turns: [{ role: 'user', content: mainParts }],
+    maxTokens: 4500,
+  }, 'The report was cut short. Please retry with a smaller document.')
 
-  if (response.stop_reason === 'max_tokens') {
-    throw new Error('The report was cut short. Please retry with a smaller document.')
-  }
-  let result = response.content.filter(block => block.type === 'text').map(block => block.text).join('\n')
   const required = ['Project Name', 'Document Type', 'Story', 'At a Glance', 'Table 4 — Major Production Drivers', 'Table 5 — Questions Before Quoting', 'Table 1 — Locations Breakdown', 'Table 2 — Cast Breakdown', 'Table 3 — Wardrobe Breakdown']
   if (required.some(heading => !result.includes(`## ${heading}\n`))) {
     throw new Error('The analysis returned an incomplete report. Please retry.')
@@ -268,24 +284,23 @@ Only additional actionable details not already captured above: specific props, c
 
   // If a brief/storyboard was also uploaded, run a second call to generate the differences table
   if (briefFileBuffer && briefFileBuffer.length > 0) {
-    let briefContent
+    let briefParts
     if (briefFileType && briefFileType.startsWith('image/')) {
       const base64 = Buffer.from(briefFileBuffer).toString('base64')
-      briefContent = [
-        { type: 'image', source: { type: 'base64', media_type: briefFileType, data: base64 } },
+      briefParts = [
+        { type: 'image', mediaType: briefFileType, base64 },
         { type: 'text', text: 'This is the agency brief / storyboard.' },
       ]
     } else if (briefFileType === 'application/pdf') {
       const base64 = Buffer.from(briefFileBuffer).toString('base64')
-      briefContent = [
-        { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } },
-        ...textLayerBlock(briefFileText),
+      briefParts = [
+        { type: 'pdf', base64, extractedText: briefFileText },
         { type: 'text', text: 'This is the agency brief / storyboard.' },
       ]
     } else {
       const mammoth = require('mammoth')
       const parsed = await mammoth.extractRawText({ buffer: Buffer.from(briefFileBuffer) })
-      briefContent = `Agency Brief / Storyboard:\n\n${parsed.value}`
+      briefParts = [{ type: 'text', text: `Agency Brief / Storyboard:\n\n${parsed.value}` }]
     }
 
     const COMPARE_PROMPT = `Compare the original treatment with the agency brief/storyboard. Report only differences that change production scope, cost, feasibility or deliverables. No repeated breakdown or stylistic observations without production consequences. Never invent quantities or numeric cost impacts. Preserve exact stated details. Distinguish missing information from contradiction. Cite actual page numbers or named sections for each document; never invent references. Label inferred implications "Suggested:".
@@ -295,23 +310,20 @@ Output only:
 | --- | --- | --- | --- | --- |
 Maximum 5 material differences, most important first; aim for under 100 words. Use short precise phrases. If none, one row: "No material differences identified | — | — | — | —". No prose, emojis or filler.`
 
-    assertRequestSize([messageContent, result, briefContent])
-    const compareResponse = await client.messages.create({
-      model: 'claude-opus-4-8',
-      max_tokens: 1800,
+    assertRequestSize([mainParts, result, briefParts])
+    const comparison = await generateOrExplain(provider, {
+      apiKey,
+      model,
       system: COMPARE_PROMPT,
-      messages: [
-        { role: 'user', content: messageContent },
+      turns: [
+        { role: 'user', content: mainParts },
         { role: 'assistant', content: result },
-        { role: 'user', content: Array.isArray(briefContent)
-            ? [...briefContent, { type: 'text', text: 'Now compare this agency brief/storyboard against the treatment above and produce Table 9.' }]
-            : `Now compare this agency brief/storyboard against the treatment above and produce Table 9.\n\n${briefContent}`
-        },
+        { role: 'user', content: [...briefParts, { type: 'text', text: 'Now compare this agency brief/storyboard against the treatment above and produce Table 9.' }] },
       ],
-    })
+      maxTokens: 1800,
+    }, 'The brief comparison was incomplete. Please retry.')
 
-    const comparison = compareResponse.content.filter(block => block.type === 'text').map(block => block.text).join('\n')
-    if (compareResponse.stop_reason === 'max_tokens' || !comparison.includes('## Table 7 — Brief vs Treatment: Decisions\n')) {
+    if (!comparison.includes('## Table 7 — Brief vs Treatment: Decisions\n')) {
       throw new Error('The brief comparison was incomplete. Please retry.')
     }
     result = result + '\n\n' + comparison
