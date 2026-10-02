@@ -64,6 +64,38 @@ app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow()
 })
 
+// Start in the local home folder rather than restoring a stalled iCloud picker.
+ipcMain.handle('choose-source-file', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+    title: 'Choose treatment or brief',
+    defaultPath: app.getPath('home'),
+    properties: ['openFile'],
+    filters: [{ name: 'Treatment and brief', extensions: ['pdf', 'docx', 'jpg', 'jpeg', 'png'] }],
+  })
+  if (canceled || !filePaths[0]) return null
+  const filePath = filePaths[0]
+  const types = {
+    '.pdf': 'application/pdf',
+    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+  }
+  const type = types[path.extname(filePath).toLowerCase()]
+  if (!type) throw new Error('Choose a PDF, DOCX, JPG or PNG file.')
+  // Cloud-only files may need downloading. Never leave the UI waiting forever.
+  let timer
+  try {
+    const bytes = await Promise.race([
+      fs.promises.readFile(filePath),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('This file is taking too long to open. Download it from iCloud first, or choose a local copy.')), 20000)
+      }),
+    ])
+    return { name: path.basename(filePath), type, bytes: new Uint8Array(bytes) }
+  } finally {
+    clearTimeout(timer)
+  }
+})
+
 // ── IPC: API Key ──────────────────────────────────────────────────────────────
 
 ipcMain.handle('save-api-key', (_, key) => {
@@ -125,71 +157,64 @@ ipcMain.handle('analyze-brief', async (_, { text, fileBuffer, fileType, fileName
   const Anthropic = require('@anthropic-ai/sdk')
   const client = new Anthropic.default({ apiKey })
 
-  const SYSTEM_PROMPT = `You are a Senior Executive Producer in Egyptian/MENA commercial production. Read the document and fill the tables below. Be extremely concise — every cell is a keyword or short phrase, never a full sentence. No prose before or after the tables. No filler rows.
+  const SYSTEM_PROMPT = `You are an executive producer reading a TV commercial treatment or brief. Produce the shortest useful, source-grounded production report. Read the whole document before writing. Prioritize understanding the story, confirmed scope, major production drivers, and unresolved decisions.
 
-CELL RULES:
-- Max 4 words per cell. Fragments only — never sentences.
-- Lead with the number wherever one exists: "3 days", "12 extras", "2x backup".
-- Never use explanatory connectives: because, due to, in order to, so that, which.
-- "Why Implied" = 3 words max (e.g. "night scene lighting")
-- Flags = single keyword or emoji only
-- Omit any row where the category doesn't apply
+ACCURACY AND BREVITY:
+- Never invent quantities, shoot days, equipment packages, costs, percentages, timelines or deliverables. Preserve exact stated names, quantities and specifications.
+- Use "Not specified" for unknown essentials. Do not turn an unknown quantity into zero.
+- Separate explicit facts from suggestions. Any inference must begin "Suggested:"; never describe an inference as confirmed. Producer notes are a separate source, not evidence of document content.
+- Source cells: cite actual PDF page numbers, or a named heading for DOCX/text, or "Image" / "Producer notes". Never invent page references. Use "Not specified" when absent.
+- Do not prescribe routine crew or equipment. Include technical requirements only when explicit or essential to an unusual execution; label suggestions.
+- Keep the snapshot high-level; put detailed location, cast and wardrobe entries in their dedicated tables. No filler, generic advice, abbreviation glossary, severity emojis or executive closing note.
+- Use the shortest wording that preserves meaning. Usually 3–10 words per detail; exact technical specifications may be longer.
+- Aim for 250–350 words for the overview sections, excluding headers and the location, cast and wardrobe tables. Keep those detailed tables concise but complete. Never omit a distinct stated production requirement merely to meet the target. Combine related items only when quantities and sources remain clear.
+- Output only the following markdown headings and pipe tables. Use a separator row in every table. Do not place literal pipe characters inside cells.
 
 ## Project Name
-[Brand + product + market, one line, no quotes]
+[Exact project/brand name when stated; otherwise Untitled Project]
 
 ## Document Type
-[Agency Brief / Director's Treatment / Hybrid — 5 words max on complexity driver]
+[Agency Brief / Director's Treatment / Hybrid]
 
 ## Story
-| # | Beat |
-3-5 rows, in screen order. Present tense, max 8 words per beat. What the viewer actually sees.
-No interpretation, no brand messaging — just what happens.
-
-## Table 1 — Production Requirements Overview
-| Category | Stated | Implied | Why Implied | Complexity |
-Use: 🟢 Low / 🟡 Medium / 🔴 High
-
-## Table 2 — Sets & Locations Breakdown
-| # | Set / Location | Build or Scout | Key Features | S/I | Complexity |
-S/I = Stated or Implied. One row per location.
-
-## Table 3 — Props & Hero Items
-| # | Prop / Item | Scene | Qty | S/I |
-Qty = digit for total needed, including backups and multiples.
-
-## Table 4 — Cast & Wardrobe Breakdown
-| Location | Character / Role | Cast Type | # Looks | Wardrobe | Key Props | Flag |
-- Location format: INT./EXT. NAME - DAY/NIGHT. Repeat exact name for each character at same location.
-- Cast Type: Principal / Featured Extra / BG Extra
-
-## Table 5 — Equipment Breakdown
-| Location | Dept | Item / Package | Qty | S/I | Flag |
-- Location: same INT./EXT. format. Dept: Camera / Grip / Lighting / Specialty
-
-## Table 6 — Risk & Cost Flags
-| # | Flag | Impact | Severity |
-Impact = magnitude with a number only: "+2 days", "+15% grip", "+3 crew". Never prose.
-Severity: 🔴 Budget buster / 🟡 Watch item / 🟢 Minor
-
-## Table 7 — MENA / Egypt Market Flags
-| Issue | Action | Urgency |
-Only rows that actually apply.
-
-## Table 8 — Production Summary
-| Category | Items |
-Categories in order: Shoot Days, Sets & Locations, Principal Cast, Featured Extras, BG Extras, Hero Props, Camera, Grip, Lighting, Specialty, VFX, Post, Key Risks
-Items = comma-separated keywords, numbers first.
+| # | Summary |
+| --- | --- |
+One row only: 2–3 short sentences, at most 45 words. Describe what the viewer sees in sequence and how it ends. No interpretation or invented story beats. If no story is supplied, say "Story not specified."
 
 ## At a Glance
-| Item | Detail |
-Exactly these six rows, in this order: Scope, Build, Cast, Heavy Lift, Biggest Risk, Budget Flag.
-Detail = numbers and keywords joined by " · ". Max 6 words. No sentences, no full stops.
-Example: "3 days · 5 locations" / "4 principals · 30 BG".
-Write this section LAST, after every table above is finished, so it reflects them.
+| Item | Detail | Source |
+| --- | --- | --- |
+Confirmed scope only. Include Locations, Cast & extras, Hero props, Special execution, and Deliverables. Include Shoot days only if explicitly stated. Group location names and cast roles with exact quantities. Omit inapplicable categories; retain "Not specified" for essentials needed to quote. No repeated story description.
 
-## EP Note
-[One sentence max. What the EP says to the client before signing.]`
+## Table 1 — Locations Breakdown
+| Location | INT./EXT. | Day/Night | Scenes / action | Build / Scout | Key requirements | Source |
+| --- | --- | --- | --- | --- | --- | --- |
+One row per distinct story location. Use consistent location names across all tables. Include every stated location; do not count repeat appearances as new locations. Include scene numbers only when supplied; otherwise use a brief action reference. Distinguish story locations from actual filming sites: do not invent addresses or scouting decisions. Mark unstated interior/exterior, time of day, build/scout choices and requirements "Not specified". If no locations are identifiable, one row with "Not specified" in every cell.
+
+## Table 2 — Cast Breakdown
+| Character / Role | Cast type | Qty | Age / appearance | Location / action | Source |
+| --- | --- | --- | --- | --- | --- |
+One row per distinct character or explicitly described group of extras. Include all on-screen roles and any stated voice-over roles. Use Principal / Featured extra / Background / Voice-over only when explicit; otherwise "Not specified". Preserve explicit casting specifications only. Do not infer gender, age or appearance. Count a single clearly described individual as 1; unspecified group sizes are "Not specified". Do not count the same character again at another location or in another look. Link roles to matching location names or concise action references. If no cast is identifiable, one row with "Not specified" in every cell.
+
+## Table 3 — Wardrobe Breakdown
+| Character / Group | Look / scene | Clothing / styling | Changes | Multiples / backups | Source |
+| --- | --- | --- | --- | --- | --- |
+Use the exact character/group names from Cast Breakdown. One row per explicitly distinct outfit/look; where a cast role has no wardrobe detail, one row for that role with "Not specified" for unknown cells. Capture stated clothing, colours, uniforms, accessories and relevant hair/makeup in brief phrases. Separate stated changes from suggested continuity needs. Never invent outfit counts, costume changes or backups; use "Not specified". Mention a backup only when explicitly required. Include stated wardrobe requirements for any otherwise unidentified role/group and label the role "Not specified". If there is neither cast nor wardrobe information, one row with "Not specified" in every cell.
+
+## Table 4 — Major Production Drivers
+| Requirement | Production implication | Source |
+| --- | --- | --- |
+Up to 5 material execution/budget drivers, ranked by importance: builds, crowds, vehicles, stunts, complex VFX, travel or special logistics. Name the driver; give only its non-obvious implication, marked "Suggested:" if inferred. No invented numeric impacts. If none, one row: "None identified | — | —".
+
+## Table 5 — Questions Before Quoting
+| Question | Source |
+| --- | --- |
+Up to 5 specific missing decisions that affect price or feasibility, most important first. Do not repeat confirmed facts or ask irrelevant generic questions. If none, one row: "No essential questions identified | —".
+
+## Table 6 — Essential Department Details
+| Department | Requirement | Source |
+| --- | --- | --- |
+Only additional actionable details not already captured above: specific props, camera, grip, lighting, sound, VFX or post requirements. Put wardrobe in its dedicated table below. Omit routine packages and unsupported suggestions. Omit this whole section when it adds nothing.`
 
   const notesBlock = producerNotes && producerNotes.trim()
     ? `\n\nPRODUCER'S NOTES (factor these into every table — they reflect how the team is approaching this project):\n${producerNotes.trim()}`
@@ -227,12 +252,19 @@ Write this section LAST, after every table above is finished, so it reflects the
   assertRequestSize(messageContent)
   const response = await client.messages.create({
     model: 'claude-opus-4-8',
-    max_tokens: 16000,
+    max_tokens: 4500,
     system: SYSTEM_PROMPT,
     messages: [{ role: 'user', content: messageContent }],
   })
 
-  let result = response.content[0].text
+  if (response.stop_reason === 'max_tokens') {
+    throw new Error('The report was cut short. Please retry with a smaller document.')
+  }
+  let result = response.content.filter(block => block.type === 'text').map(block => block.text).join('\n')
+  const required = ['Project Name', 'Document Type', 'Story', 'At a Glance', 'Table 4 — Major Production Drivers', 'Table 5 — Questions Before Quoting', 'Table 1 — Locations Breakdown', 'Table 2 — Cast Breakdown', 'Table 3 — Wardrobe Breakdown']
+  if (required.some(heading => !result.includes(`## ${heading}\n`))) {
+    throw new Error('The analysis returned an incomplete report. Please retry.')
+  }
 
   // If a brief/storyboard was also uploaded, run a second call to generate the differences table
   if (briefFileBuffer && briefFileBuffer.length > 0) {
@@ -256,28 +288,17 @@ Write this section LAST, after every table above is finished, so it reflects the
       briefContent = `Agency Brief / Storyboard:\n\n${parsed.value}`
     }
 
-    const COMPARE_PROMPT = `You are a Senior Executive Producer comparing a director's treatment against an agency brief.
-
-Your job: identify every meaningful difference between the two documents that has production implications. Focus on:
-- Scenes or locations in one but not the other
-- Cast or character differences
-- Props, products, or hero items that differ
-- Tone, style, or visual direction gaps
-- Technical or equipment requirements that differ
-- Timeline, shoot day, or logistics differences
-- Anything the director added beyond the brief (cost implications)
-- Anything in the brief the director ignored or changed
-
-Output ONLY this single markdown table. No prose before or after.
-
-## Table 9 — Treatment vs Brief: Key Differences
-| # | Topic | In the Brief | In the Treatment | Production Impact | Flag |
-Each row = one specific difference. Flag: 🔴 Major deviation / 🟡 Notable change / 🟢 Minor variation`
+    const COMPARE_PROMPT = `Compare the original treatment with the agency brief/storyboard. Report only differences that change production scope, cost, feasibility or deliverables. No repeated breakdown or stylistic observations without production consequences. Never invent quantities or numeric cost impacts. Preserve exact stated details. Distinguish missing information from contradiction. Cite actual page numbers or named sections for each document; never invent references. Label inferred implications "Suggested:".
+Output only:
+## Table 7 — Brief vs Treatment: Decisions
+| Topic | Brief | Treatment | Decision needed | Sources |
+| --- | --- | --- | --- | --- |
+Maximum 5 material differences, most important first; aim for under 100 words. Use short precise phrases. If none, one row: "No material differences identified | — | — | — | —". No prose, emojis or filler.`
 
     assertRequestSize([messageContent, result, briefContent])
     const compareResponse = await client.messages.create({
       model: 'claude-opus-4-8',
-      max_tokens: 8192,
+      max_tokens: 1800,
       system: COMPARE_PROMPT,
       messages: [
         { role: 'user', content: messageContent },
@@ -289,7 +310,11 @@ Each row = one specific difference. Flag: 🔴 Major deviation / 🟡 Notable ch
       ],
     })
 
-    result = result + '\n\n' + compareResponse.content[0].text
+    const comparison = compareResponse.content.filter(block => block.type === 'text').map(block => block.text).join('\n')
+    if (compareResponse.stop_reason === 'max_tokens' || !comparison.includes('## Table 7 — Brief vs Treatment: Decisions\n')) {
+      throw new Error('The brief comparison was incomplete. Please retry.')
+    }
+    result = result + '\n\n' + comparison
   }
 
   return result
@@ -376,8 +401,8 @@ ipcMain.handle('export-pdf', async (_, html) => {
 
   const pdfData = await printWin.webContents.printToPDF({
     printBackground: true,
-    pageSize: 'A3',
-    landscape: true,
+    pageSize: 'A4',
+    landscape: false,
     margins: { top: 0.5, bottom: 0.5, left: 0.5, right: 0.5 },
   })
 

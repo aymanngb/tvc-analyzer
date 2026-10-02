@@ -15,15 +15,34 @@ export default function DropZone({ onFile, uploadedFile, onClear, label = 'Drop 
   const inputRef = useRef(null)
   const [dragging, setDragging] = useState(false)
   const [rejected, setRejected] = useState(null)
+  const [opening, setOpening] = useState(false)
 
   function accept(file) {
     if (!file) return
     if (!isAccepted(file)) {
-      setRejected(file.name)
+      setRejected(`${file.name} — unsupported file type`)
       return
     }
     setRejected(null)
     onFile(file)
+  }
+
+  async function browse() {
+    if (opening) return
+    if (!window.electronAPI?.chooseSourceFile) {
+      inputRef.current?.click()
+      return
+    }
+    setOpening(true)
+    setRejected(null)
+    try {
+      const selected = await window.electronAPI.chooseSourceFile()
+      if (selected) accept(new File([selected.bytes], selected.name, { type: selected.type }))
+    } catch (err) {
+      setRejected(err.message || 'Could not open the file. Choose a local copy.')
+    } finally {
+      setOpening(false)
+    }
   }
 
   function handleDrop(e) {
@@ -56,15 +75,15 @@ export default function DropZone({ onFile, uploadedFile, onClear, label = 'Drop 
       onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
       onDragLeave={() => setDragging(false)}
       onDrop={handleDrop}
-      onClick={() => inputRef.current?.click()}
+      onClick={browse}
     >
       <div className="dropzone-inner">
         <span className="upload-icon">📂</span>
         <p className="drop-label">{label}</p>
         <p className="drop-types">PDF · DOCX · JPG · PNG</p>
-        {rejected && <p className="drop-rejected">⚠️ {rejected} — unsupported file type</p>}
-        <button className="browse-btn" onClick={(e) => { e.stopPropagation(); inputRef.current?.click() }}>
-          Browse File
+        {rejected && <p className="drop-rejected">⚠️ {rejected}</p>}
+        <button className="browse-btn" disabled={opening} onClick={(e) => { e.stopPropagation(); browse() }}>
+          {opening ? 'Opening file…' : 'Browse File'}
         </button>
       </div>
       <input

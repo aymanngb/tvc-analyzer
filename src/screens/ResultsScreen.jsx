@@ -2,21 +2,6 @@ import React from 'react'
 import AnalysisTable from '../components/AnalysisTable'
 import { parseMarkdownTable, escapeHtml } from '../lib/mdTable'
 
-const ABBREV_KEY = [
-  ['S/I', 'Stated / Implied'],
-  ['INT.', 'Interior'],
-  ['EXT.', 'Exterior'],
-  ['BG', 'Background Extras'],
-  ['Dept', 'Department'],
-  ['Qty', 'Quantity'],
-  ['DOP', 'Director of Photography'],
-  ['VFX', 'Visual Effects'],
-  ['TVC', 'TV Commercial'],
-  ['EP', 'Executive Producer'],
-  ['🔴', 'High / Budget Buster'],
-  ['🟡', 'Medium / Watch Item'],
-  ['🟢', 'Low / Minor'],
-]
 
 function parseProjectName(result) {
   const match = result.match(/## Project Name\s*\n([^\n]+)/)
@@ -39,7 +24,15 @@ function parseSections(result) {
   while ((match = regex.exec(result)) !== null) {
     sections.push({ title: match[1].trim(), content: match[2].trim() })
   }
-  return sections
+  // Keep the production tables immediately after the snapshot, including
+  // reports generated before this ordering change. UI and exports share this.
+  const first = ['Locations Breakdown', 'Cast Breakdown', 'Wardrobe Breakdown']
+  const rank = section => {
+    const name = section.title.replace(/^Table\s*\d+\s*[—-]\s*/, '')
+    const index = first.indexOf(name)
+    return index < 0 ? first.length : index
+  }
+  return sections.sort((a, b) => rank(a) - rank(b))
 }
 
 function parseEPNote(result) {
@@ -93,7 +86,7 @@ function buildPrintHTML(result, meta = {}) {
 
   const tables = sections.map(s => `
     <div class="section">
-      <div class="section-title">${escapeHtml(s.title)}</div>
+      <div class="section-title">${escapeHtml(s.title.replace(/^Table\s*\d+\s*[—-]\s*/, ''))}</div>
       ${mdTableToHtml(s.content)}
     </div>
   `).join('')
@@ -102,7 +95,7 @@ function buildPrintHTML(result, meta = {}) {
 
   const glanceMd = parseAtAGlance(result)
   const glance = glanceMd
-    ? `<div class="glance"><div class="glance-title">At a Glance</div>${mdTableToHtml(glanceMd)}</div>`
+    ? `<div class="glance"><div class="glance-title">Production Snapshot</div>${mdTableToHtml(glanceMd)}</div>`
     : ''
 
   const storyMd = parseStory(result)
@@ -110,9 +103,6 @@ function buildPrintHTML(result, meta = {}) {
     ? `<div class="story"><div class="story-title">Story</div>${mdTableToHtml(storyMd)}</div>`
     : ''
 
-  const abbrevRows = ABBREV_KEY.map(([abbr, meaning]) =>
-    `<tr><td class="abbr-key">${abbr}</td><td>${meaning}</td></tr>`
-  ).join('')
 
   return `<!DOCTYPE html>
 <html>
@@ -205,12 +195,6 @@ ${glance}
 ${tables}
 ${ep}
 
-<div class="abbrev-section">
-  <div class="abbrev-title">Abbreviations Key</div>
-  <div class="abbrev-grid">
-    <table><tbody>${abbrevRows}</tbody></table>
-  </div>
-</div>
 
 <footer>
   <span>${escapeHtml(projectName)} &nbsp;·&nbsp; Production Breakdown &nbsp;·&nbsp; ${escapeHtml(projectDate)}</span>
@@ -260,7 +244,7 @@ export default function ResultsScreen({ result, projectMeta = {}, onNewBrief }) 
 
   const nav = [
     ...(story ? [{ id: 'sec-story', label: 'Story' }] : []),
-    ...(glance ? [{ id: 'sec-glance', label: 'At a Glance' }] : []),
+    ...(glance ? [{ id: 'sec-glance', label: 'Production Snapshot' }] : []),
     // Rail shows the table's name, not its number: "Props & Hero Items", not "Table 3".
     ...sections.map((s) => ({ id: slug(s.title), label: s.title.replace(/^Table\s*\d+\s*[—-]\s*/, ''), full: s.title })),
     ...(epNote ? [{ id: 'sec-ep', label: 'EP Note' }] : []),
@@ -357,7 +341,7 @@ export default function ResultsScreen({ result, projectMeta = {}, onNewBrief }) 
               <div className="card-title">Story</div>
               <ol className="story-beats">
                 {story.rows.map((row, i) => (
-                  <li key={i}><span className="beat-n">{row[0]}</span><span className="beat-t">{row[1]}</span></li>
+                  <li key={i}><span className="beat-t">{row[1]}</span></li>
                 ))}
               </ol>
             </section>
@@ -365,13 +349,14 @@ export default function ResultsScreen({ result, projectMeta = {}, onNewBrief }) 
 
           {glance && (
             <section id="sec-glance" className="glance-card">
-              <div className="glance-card-title">At a Glance</div>
+              <div className="glance-card-title">Production Snapshot</div>
               <table className="glance-table">
                 <tbody>
                   {glance.rows.map((row, i) => (
                     <tr key={i}>
                       <td className="glance-item">{row[0]}</td>
                       <td className="glance-detail">{row[1]}</td>
+                      {glance.headers.length > 2 && <td>{row[2]}</td>}
                     </tr>
                   ))}
                 </tbody>
@@ -382,7 +367,7 @@ export default function ResultsScreen({ result, projectMeta = {}, onNewBrief }) 
           {sections.map((section, i) => (
             <div id={slug(section.title)} key={i}>
               <AnalysisTable
-                title={section.title}
+                title={section.title.replace(/^Table\s*\d+\s*[—-]\s*/, '')}
                 content={section.content}
                 badgeSummary={countComplexity(section.content)}
               />
@@ -396,20 +381,7 @@ export default function ResultsScreen({ result, projectMeta = {}, onNewBrief }) 
             </section>
           )}
 
-          <details className="abbrev-block">
-            <summary className="abbrev-summary">
-              <span className="notes-chevron" aria-hidden="true">›</span>
-              Abbreviations
-            </summary>
-            <div className="abbrev-key-grid">
-              {ABBREV_KEY.map(([abbr, meaning]) => (
-                <div className="abbrev-item" key={abbr}>
-                  <span className="abbrev-short">{abbr}</span>
-                  <span className="abbrev-meaning">{meaning}</span>
-                </div>
-              ))}
-            </div>
-          </details>
+
         </div>
       </div>
     </div>
