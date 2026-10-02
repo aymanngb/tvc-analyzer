@@ -22,6 +22,10 @@ function buildInput(turns) {
 }
 
 function parseResponse(response) {
+  if (!response.output_text) {
+    const reason = response.incomplete_details?.reason || response.status || 'empty response'
+    throw new Error(`OpenAI returned no text (${reason}). Try again or switch models.`)
+  }
   return response.output_text
 }
 

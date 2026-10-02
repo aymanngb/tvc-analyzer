@@ -42,3 +42,17 @@ test('buildInput omits the note item when a pdf part has no extractedText', () =
 test('parseResponse reads output_text', () => {
   assert.equal(openai.parseResponse({ output_text: 'result text' }), 'result text')
 })
+
+test('parseResponse throws with the incomplete reason when output_text is empty', () => {
+  assert.throws(
+    () => openai.parseResponse({ output_text: '', incomplete_details: { reason: 'max_output_tokens' } }),
+    /max_output_tokens/,
+  )
+})
+
+test('parseResponse throws with the status when there is no incomplete reason', () => {
+  assert.throws(
+    () => openai.parseResponse({ output_text: '', status: 'failed' }),
+    /failed/,
+  )
+})
