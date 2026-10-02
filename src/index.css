@@ -430,6 +430,12 @@ button { transition: transform var(--press), background var(--press), border-col
   transition: border-color var(--press);
 }
 .key-input:focus { border-color: rgba(153, 204, 0, 0.5); }
+.select-input {
+  width: 100%; background: rgba(0,0,0,0.3); border: 1px solid var(--hairline);
+  border-radius: var(--r-sm); color: var(--text); padding: 0.625rem 0.75rem;
+  font-size: 13px; outline: none; transition: border-color var(--press);
+}
+.select-input:focus { border-color: rgba(153, 204, 0, 0.5); }
 .toggle-btn { padding: 0 0.75rem; border-radius: var(--r-sm); background: var(--surface-3); font-size: 12px; color: var(--text-2); }
 .toggle-btn:hover { background: #2c2c31; color: var(--text); }
 .model-info { display: flex; flex-direction: column; gap: 0.25rem; }
