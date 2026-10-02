@@ -46,3 +46,30 @@ test('buildContents omits the text part when a pdf part has no extractedText', (
 test('parseResponse reads the .text property', () => {
   assert.equal(gemini.parseResponse({ text: 'result text' }), 'result text')
 })
+
+test('parseResponse throws with the block reason when the prompt was blocked', () => {
+  assert.throws(
+    () => gemini.parseResponse({ text: undefined, promptFeedback: { blockReason: 'SAFETY' } }),
+    /SAFETY/,
+  )
+})
+
+test('parseResponse throws with the finish reason when a candidate has no text', () => {
+  assert.throws(
+    () => gemini.parseResponse({ text: undefined, candidates: [{ finishReason: 'MAX_TOKENS' }] }),
+    /MAX_TOKENS/,
+  )
+})
+
+test('buildRequestParams nests systemInstruction and maxOutputTokens inside config', () => {
+  const params = gemini.buildRequestParams({
+    model: 'gemini-3.8-flash',
+    system: 'SYSTEM PROMPT TEXT',
+    turns: [{ role: 'user', content: 'hi' }],
+    maxTokens: 16000,
+  })
+  assert.equal(params.model, 'gemini-3.8-flash')
+  assert.deepEqual(params.contents, [{ role: 'user', parts: [{ text: 'hi' }] }])
+  assert.deepEqual(params.config, { systemInstruction: 'SYSTEM PROMPT TEXT', maxOutputTokens: 16000 })
+  assert.equal(params.systemInstruction, undefined)
+})

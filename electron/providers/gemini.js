@@ -22,18 +22,25 @@ function buildContents(turns) {
 }
 
 function parseResponse(response) {
+  if (!response.text) {
+    const reason = response.promptFeedback?.blockReason || response.candidates?.[0]?.finishReason || 'empty response'
+    throw new Error(`Gemini returned no text (${reason}). Try again or switch models.`)
+  }
   return response.text
+}
+
+function buildRequestParams({ model, system, turns, maxTokens }) {
+  return {
+    model,
+    contents: buildContents(turns),
+    config: { systemInstruction: system, maxOutputTokens: maxTokens },
+  }
 }
 
 async function generate({ apiKey, model, system, turns, maxTokens }) {
   const { GoogleGenAI } = require('@google/genai')
   const client = new GoogleGenAI({ apiKey })
-  const response = await client.models.generateContent({
-    model,
-    contents: buildContents(turns),
-    systemInstruction: system,
-    config: { maxOutputTokens: maxTokens },
-  })
+  const response = await client.models.generateContent(buildRequestParams({ model, system, turns, maxTokens }))
   return parseResponse(response)
 }
 
@@ -48,6 +55,7 @@ module.exports = {
   ],
   defaultModel: 'gemini-3.1-pro-preview',
   buildContents,
+  buildRequestParams,
   parseResponse,
   generate,
 }
