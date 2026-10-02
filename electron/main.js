@@ -3,7 +3,7 @@ const path = require('path')
 const fs = require('fs')
 const {
   migrateConfig, withProviderKeyEncrypted, withProviderKeyPlain,
-  withActiveProvider, withProviderModel, getKeyMaterial, settingsView,
+  withActiveProvider, withProviderModel, getKeyMaterial, settingsView, missingKeyMessage,
 } = require('./config')
 const { getProvider, PROVIDER_IDS } = require('./providers')
 
@@ -110,16 +110,6 @@ ipcMain.handle('set-provider-model', (_, providerId, modelId) => {
 
 // ── Request helpers ───────────────────────────────────────────────────────────
 
-// Large PDFs arrive rasterized to images, which drops their text layer; the
-// renderer extracts that text separately so small print isn't lost to the JPEG.
-function textLayerBlock(extracted) {
-  if (!extracted || !extracted.trim()) return []
-  return [{
-    type: 'text',
-    text: `Text layer extracted from the PDF above, page by page. The pages were compressed to images, so use this for exact wording, names and numbers:\n\n${extracted}`,
-  }]
-}
-
 // The API rejects requests over 32 MB. Catch it here with a message a producer
 // can act on, rather than surfacing a raw 413.
 const REQUEST_LIMIT = 32 * 1024 * 1024
@@ -135,17 +125,12 @@ function assertRequestSize(parts) {
 
 ipcMain.handle('analyze-brief', async (_, { text, fileBuffer, fileType, fileName, fileText, producerNotes, briefFileBuffer, briefFileType, briefFileName, briefFileText }) => {
   const config = readConfig()
-  let apiKey = ''
-  if (config.apiKeyEncrypted && safeStorage.isEncryptionAvailable()) {
-    apiKey = safeStorage.decryptString(Buffer.from(config.apiKeyEncrypted, 'base64'))
-  } else {
-    apiKey = config.apiKey || ''
-  }
+  const provider = getProvider(config.activeProvider)
+  const apiKey = decryptKey(getKeyMaterial(config, config.activeProvider))
 
-  if (!apiKey) throw new Error('No API key configured. Open Settings and add your Anthropic API key.')
+  if (!apiKey) throw new Error(missingKeyMessage(provider.label))
 
-  const Anthropic = require('@anthropic-ai/sdk')
-  const client = new Anthropic.default({ apiKey })
+  const model = config.providers[config.activeProvider].model
 
   const SYSTEM_PROMPT = `You are a Senior Executive Producer in Egyptian/MENA commercial production. Read the document and fill the tables below. Be extremely concise — every cell is a keyword or short phrase, never a full sentence. No prose before or after the tables. No filler rows.
 
@@ -217,20 +202,19 @@ Write this section LAST, after every table above is finished, so it reflects the
     ? `\n\nPRODUCER'S NOTES (factor these into every table — they reflect how the team is approaching this project):\n${producerNotes.trim()}`
     : ''
 
-  let messageContent
+  let mainParts
 
   if (fileBuffer && fileType && fileType.startsWith('image/')) {
     const base64 = Buffer.from(fileBuffer).toString('base64')
-    messageContent = [
-      { type: 'image', source: { type: 'base64', media_type: fileType, data: base64 } },
+    mainParts = [
+      { type: 'image', mediaType: fileType, base64 },
       { type: 'text', text: `Analyze this brief:${notesBlock}` },
     ]
   } else if (fileBuffer && fileType === 'application/pdf') {
-    // Send PDF directly to Claude — works for both text and image-based PDFs
+    // Send the PDF directly — works for both text and image-based PDFs
     const base64 = Buffer.from(fileBuffer).toString('base64')
-    messageContent = [
-      { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } },
-      ...textLayerBlock(fileText),
+    mainParts = [
+      { type: 'pdf', base64, extractedText: fileText },
       { type: 'text', text: `Analyze this brief:${notesBlock}` },
     ]
   } else {
@@ -243,39 +227,37 @@ Write this section LAST, after every table above is finished, so it reflects the
     }
 
     if (!content.trim()) throw new Error('Could not extract text from the uploaded file.')
-    messageContent = `Analyze this brief:${notesBlock}\n\n${content}`
+    mainParts = [{ type: 'text', text: `Analyze this brief:${notesBlock}\n\n${content}` }]
   }
 
-  assertRequestSize(messageContent)
-  const response = await client.messages.create({
-    model: 'claude-opus-4-8',
-    max_tokens: 16000,
+  assertRequestSize(mainParts)
+  let result = await provider.generate({
+    apiKey,
+    model,
     system: SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: messageContent }],
+    turns: [{ role: 'user', content: mainParts }],
+    maxTokens: 16000,
   })
-
-  let result = response.content[0].text
 
   // If a brief/storyboard was also uploaded, run a second call to generate the differences table
   if (briefFileBuffer && briefFileBuffer.length > 0) {
-    let briefContent
+    let briefParts
     if (briefFileType && briefFileType.startsWith('image/')) {
       const base64 = Buffer.from(briefFileBuffer).toString('base64')
-      briefContent = [
-        { type: 'image', source: { type: 'base64', media_type: briefFileType, data: base64 } },
+      briefParts = [
+        { type: 'image', mediaType: briefFileType, base64 },
         { type: 'text', text: 'This is the agency brief / storyboard.' },
       ]
     } else if (briefFileType === 'application/pdf') {
       const base64 = Buffer.from(briefFileBuffer).toString('base64')
-      briefContent = [
-        { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } },
-        ...textLayerBlock(briefFileText),
+      briefParts = [
+        { type: 'pdf', base64, extractedText: briefFileText },
         { type: 'text', text: 'This is the agency brief / storyboard.' },
       ]
     } else {
       const mammoth = require('mammoth')
       const parsed = await mammoth.extractRawText({ buffer: Buffer.from(briefFileBuffer) })
-      briefContent = `Agency Brief / Storyboard:\n\n${parsed.value}`
+      briefParts = [{ type: 'text', text: `Agency Brief / Storyboard:\n\n${parsed.value}` }]
     }
 
     const COMPARE_PROMPT = `You are a Senior Executive Producer comparing a director's treatment against an agency brief.
@@ -296,22 +278,20 @@ Output ONLY this single markdown table. No prose before or after.
 | # | Topic | In the Brief | In the Treatment | Production Impact | Flag |
 Each row = one specific difference. Flag: 🔴 Major deviation / 🟡 Notable change / 🟢 Minor variation`
 
-    assertRequestSize([messageContent, result, briefContent])
-    const compareResponse = await client.messages.create({
-      model: 'claude-opus-4-8',
-      max_tokens: 8192,
+    assertRequestSize([mainParts, result, briefParts])
+    const compareResult = await provider.generate({
+      apiKey,
+      model,
       system: COMPARE_PROMPT,
-      messages: [
-        { role: 'user', content: messageContent },
+      turns: [
+        { role: 'user', content: mainParts },
         { role: 'assistant', content: result },
-        { role: 'user', content: Array.isArray(briefContent)
-            ? [...briefContent, { type: 'text', text: 'Now compare this agency brief/storyboard against the treatment above and produce Table 9.' }]
-            : `Now compare this agency brief/storyboard against the treatment above and produce Table 9.\n\n${briefContent}`
-        },
+        { role: 'user', content: [...briefParts, { type: 'text', text: 'Now compare this agency brief/storyboard against the treatment above and produce Table 9.' }] },
       ],
+      maxTokens: 8192,
     })
 
-    result = result + '\n\n' + compareResponse.content[0].text
+    result = result + '\n\n' + compareResult
   }
 
   return result
