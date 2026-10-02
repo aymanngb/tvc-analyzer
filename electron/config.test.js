@@ -30,9 +30,29 @@ test('migrateConfig prefers the encrypted legacy field when both are present', (
   assert.equal(config.providers.anthropic.apiKey, undefined)
 })
 
-test('migrateConfig returns an already-migrated config unchanged', () => {
-  const already = { activeProvider: 'openai', providers: { openai: { model: 'gpt-6-sol' } } }
+test('migrateConfig preserves an already-complete config unchanged', () => {
+  const already = migrateConfig({})
   assert.deepEqual(migrateConfig(already), already)
+})
+
+test('migrateConfig fills in a provider missing from an otherwise-migrated config', () => {
+  const partial = { activeProvider: 'openai', providers: { openai: { model: 'gpt-6-sol', apiKeyEncrypted: 'ENC-OPENAI' } } }
+  const result = migrateConfig(partial)
+  assert.equal(result.activeProvider, 'openai')
+  assert.equal(result.providers.openai.model, 'gpt-6-sol')
+  assert.equal(result.providers.openai.apiKeyEncrypted, 'ENC-OPENAI')
+  assert.equal(result.providers.anthropic.model, 'claude-opus-4-8')
+  assert.equal(result.providers.gemini.model, 'gemini-3.1-pro-preview')
+})
+
+test('migrateConfig defaults activeProvider when missing', () => {
+  const noActive = { providers: { anthropic: { model: 'claude-opus-4-8' } } }
+  assert.equal(migrateConfig(noActive).activeProvider, 'anthropic')
+})
+
+test('migrateConfig defaults activeProvider when it names an unknown provider', () => {
+  const badActive = { activeProvider: 'bogus', providers: { anthropic: { model: 'claude-opus-4-8' } } }
+  assert.equal(migrateConfig(badActive).activeProvider, 'anthropic')
 })
 
 test('withProviderKeyEncrypted sets only the target provider, leaving siblings untouched', () => {

@@ -1,20 +1,24 @@
 const { PROVIDERS, PROVIDER_IDS, DEFAULT_PROVIDER } = require('./providers')
 
 function migrateConfig(raw) {
-  if (raw.providers) return raw
-
   const providers = {}
   for (const id of PROVIDER_IDS) {
-    providers[id] = { model: PROVIDERS[id].defaultModel }
+    providers[id] = { model: PROVIDERS[id].defaultModel, ...(raw.providers && raw.providers[id]) }
   }
 
-  if (raw.apiKeyEncrypted) {
-    providers.anthropic.apiKeyEncrypted = raw.apiKeyEncrypted
-  } else if (raw.apiKey) {
-    providers.anthropic.apiKey = raw.apiKey
+  if (!raw.providers) {
+    if (raw.apiKeyEncrypted) {
+      providers.anthropic.apiKeyEncrypted = raw.apiKeyEncrypted
+    } else if (raw.apiKey) {
+      providers.anthropic.apiKey = raw.apiKey
+    }
   }
 
-  return { activeProvider: DEFAULT_PROVIDER, providers }
+  const activeProvider = raw.activeProvider && PROVIDER_IDS.includes(raw.activeProvider)
+    ? raw.activeProvider
+    : DEFAULT_PROVIDER
+
+  return { activeProvider, providers }
 }
 
 function withProvider(config, providerId, updates) {

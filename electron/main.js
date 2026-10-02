@@ -17,8 +17,11 @@ function readConfig() {
   } catch {
     raw = {}
   }
+  // migrateConfig also normalizes an already-migrated config (e.g. filling in a
+  // provider added to the registry after this config was last written), so the
+  // on-disk file always needs refreshing, not just on the old-shape -> new-shape path.
   const migrated = migrateConfig(raw)
-  if (!raw.providers) writeConfig(migrated)
+  writeConfig(migrated)
   return migrated
 }
 
