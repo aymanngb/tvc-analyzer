@@ -2,8 +2,11 @@ const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('electronAPI', {
   analyzeBreif: (payload) => ipcRenderer.invoke('analyze-brief', payload),
-  saveApiKey: (key) => ipcRenderer.invoke('save-api-key', key),
-  getApiKey: () => ipcRenderer.invoke('get-api-key'),
+  getSettings: () => ipcRenderer.invoke('get-settings'),
+  getProviderKey: (providerId) => ipcRenderer.invoke('get-provider-key', providerId),
+  saveProviderKey: (providerId, key) => ipcRenderer.invoke('save-provider-key', providerId, key),
+  setActiveProvider: (providerId) => ipcRenderer.invoke('set-active-provider', providerId),
+  setProviderModel: (providerId, modelId) => ipcRenderer.invoke('set-provider-model', providerId, modelId),
   exportPDF: (html) => ipcRenderer.invoke('export-pdf', html),
   exportXLSX: (payload) => ipcRenderer.invoke('export-xlsx', payload),
 })
